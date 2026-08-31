@@ -4,7 +4,9 @@
 //   - eth_getLogs MUST go to the public RPC (or Blockscout) — Alchemy's free
 //     tier caps getLogs at a 10-block range, useless for our windows.
 //   - Everything else (blockNumber, eth_call, receipts, block lookups) goes
-//     to Alchemy when the ALCHEMY_URL secret is set — generous free tier.
+//     to Alchemy when the ALCHEMY_URL secret is set — generous free tier —
+//     falling back to the public RPC when Alchemy is down (e.g. monthly
+//     capacity exhausted).
 //   - Blockscout's REST logs API is the last-resort fallback for logs when
 //     the public RPC 429s (it 429s Cloudflare workers a lot, but retries).
 
@@ -41,21 +43,58 @@ export interface EvmLog {
   timeStamp?: string;
 }
 
-/** Make a JSON-RPC request (to Alchemy when configured, else the public RPC). */
+/** When Alchemy answers with a hard "monthly capacity exceeded" 429, stop
+ * probing it for a while — every wasted attempt doubles RPC pressure on the
+ * public fallback exactly when that fallback is itself throttling. */
+let alchemyDeadUntil = 0;
+const ALCHEMY_DEAD_MS = 6 * 60 * 60 * 1000;
+
+/** Make a JSON-RPC call. Primary source is the configured general RPC
+ * (Alchemy when set); on failure it retries once against the public RPC.
+ * Alchemy's free tier runs dry days before the monthly reset — during the
+ * 2026-08-25 outage every feed tick died at the head fetch while the public
+ * RPC was serving 200s the whole time. Error bodies are always drained so
+ * unread responses can't exhaust the Workers concurrent-request budget. */
 export async function rpc(
   method: string,
   params: unknown[],
 ): Promise<unknown> {
-  const res = await fetch(generalRpcUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    signal: AbortSignal.timeout(8_000),
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  if (!res.ok) throw new Error(`rpc http ${res.status}`);
-  const json = (await res.json()) as { result?: unknown; error?: unknown };
-  if (json.error) throw new Error(`rpc error: ${JSON.stringify(json.error)}`);
-  return json.result;
+  const sources: string[] = [];
+  if (generalRpcUrl !== RH_RPC && Date.now() >= alchemyDeadUntil) {
+    sources.push(generalRpcUrl);
+  }
+  sources.push(RH_RPC);
+  let lastErr: unknown;
+  for (const url of sources) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: AbortSignal.timeout(8_000),
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        if (
+          url !== RH_RPC &&
+          res.status === 429 &&
+          body.includes("Monthly capacity")
+        ) {
+          alchemyDeadUntil = Date.now() + ALCHEMY_DEAD_MS;
+          console.warn(
+            "[chain] alchemy monthly capacity exhausted — public RPC takes over general calls for 6h",
+          );
+        }
+        throw new Error(`rpc http ${res.status}`);
+      }
+      const json = (await res.json()) as { result?: unknown; error?: unknown };
+      if (json.error) throw new Error(`rpc error: ${JSON.stringify(json.error)}`);
+      return json.result;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr;
 }
 
 /** Decode a 32-byte hex word as a signed int256. */
@@ -190,7 +229,10 @@ export async function fetchLogs(
       const res = await fetch(`${EXPLORER_API}?${q.toString()}`, {
         signal: AbortSignal.timeout(8_000),
       });
-      if (!res.ok) throw new Error(`blockscout http ${res.status}`);
+      if (!res.ok) {
+        await res.text().catch(() => "");
+        throw new Error(`blockscout http ${res.status}`);
+      }
       const json = (await res.json()) as {
         status?: string;
         message?: string;
@@ -217,7 +259,10 @@ async function rpcLogs(method: string, params: unknown[]): Promise<unknown> {
     signal: AbortSignal.timeout(8_000),
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   });
-  if (!res.ok) throw new Error(`rpc http ${res.status}`);
+  if (!res.ok) {
+    await res.text().catch(() => "");
+    throw new Error(`rpc http ${res.status}`);
+  }
   const json = (await res.json()) as { result?: unknown; error?: unknown };
   if (json.error) throw new Error(`rpc error: ${JSON.stringify(json.error)}`);
   return json.result;
