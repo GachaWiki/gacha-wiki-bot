@@ -23,8 +23,10 @@ export interface DiscordEmbed {
   color?: number; // RGB as a single int: (r<<16) | (g<<8) | b
   image?: { url: string };
   thumbnail?: { url: string };
+  author?: { name: string; url?: string; icon_url?: string };
   footer?: { text: string };
   timestamp?: string; // ISO 8601
+  fields?: { name: string; value: string; inline?: boolean }[];
 }
 
 /** Sleep helper. */

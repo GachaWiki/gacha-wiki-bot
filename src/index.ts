@@ -7,6 +7,7 @@
 import { GatewayDO } from "./gateway";
 import { RH_RPC } from "./config";
 import { setGeneralRpcUrl } from "./evm";
+import { handleGithubWebhook } from "./wikifeed";
 import {
   doStore,
   handleRolePickInteraction,
@@ -30,6 +31,17 @@ interface Env {
   MEMBER_ROLE_ID?: string;
   /** Alchemy endpoint for general RPC calls (secret; free tier 10-block getLogs cap means logs stay on the public RPC). */
   ALCHEMY_URL?: string;
+  /** Discord channel for GitHub wiki-commit updates (the #wiki-updates channel). */
+  WIKI_UPDATES_CHANNEL_ID?: string;
+  /** Shared secret of the GitHub webhook on boring877/gacha-wiki. */
+  GITHUB_WEBHOOK_SECRET?: string;
+  /** #x-feed channel id — mirror target for bot-posted tweets. */
+  X_FEED_CHANNEL_ID?: string;
+  /** X (Twitter) API credentials — all four together enable crossposting. */
+  X_API_KEY?: string;
+  X_API_SECRET?: string;
+  X_ACCESS_TOKEN?: string;
+  X_ACCESS_SECRET?: string;
 }
 
 /** Stable id for the singleton DO instance. */
@@ -206,6 +218,22 @@ export default {
       return Response.json({
         general: await probe(general, general.includes("g.alchemy.com") ? "alchemy" : "public"),
         logsRpc: await probe(RH_RPC, "public"),
+      });
+    }
+
+    // GitHub webhook: pushes to the wiki repo -> #wiki-updates embeds
+    // (+ optional X crosspost into #x-feed when X_* secrets are set).
+    // Stateless (no DO involvement) — signature-verified in wikifeed.ts.
+    if (url.pathname === "/github-webhook" && request.method === "POST") {
+      return handleGithubWebhook(request, {
+        DISCORD_TOKEN: env.DISCORD_TOKEN,
+        WIKI_UPDATES_CHANNEL_ID: env.WIKI_UPDATES_CHANNEL_ID,
+        GITHUB_WEBHOOK_SECRET: env.GITHUB_WEBHOOK_SECRET,
+        X_FEED_CHANNEL_ID: env.X_FEED_CHANNEL_ID,
+        X_API_KEY: env.X_API_KEY,
+        X_API_SECRET: env.X_API_SECRET,
+        X_ACCESS_TOKEN: env.X_ACCESS_TOKEN,
+        X_ACCESS_SECRET: env.X_ACCESS_SECRET,
       });
     }
 

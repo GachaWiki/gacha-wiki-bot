@@ -39,3 +39,8 @@ BUYS_CHANNEL_ID = ""
 GUILD_ID = "1534112093752659968"
 OG_ROLE_ID = "1538113608427507742"
 MEMBER_ROLE_ID = "1538409320155324457"
+# #wiki-updates (Info category) — target of the GitHub push webhook.
+WIKI_UPDATES_CHANNEL_ID = "1545851895074263080"
+# X crosspost: #x-feed was DELETED 2026-09-05 (no free X read path, user won't
+# pay for the API). src/xpost.ts stays dormant — no X_* secrets are set. If X
+# posting is ever revived, create a channel and re-add X_FEED_CHANNEL_ID here.

@@ -39,10 +39,20 @@ A Discord bot for the GachaWiki $GW token. Live in production on Cloudflare Work
 
 ## Deploying changes
 ```bash
-bunx wrangler deploy    # ships new code
+bunx wrangler deploy --var BUYS_CHANNEL_ID:1536699696817381426   # ships new code
 bunx wrangler secret put DISCORD_TOKEN    # only if token changed
 ```
+⚠️ The `--var BUYS_CHANNEL_ID` flag is REQUIRED on every deploy — wrangler.toml ships it empty, so a bare deploy silences the buy/sell/burn feeds. `WIKI_UPDATES_CHANNEL_ID` is a real value in wrangler.toml and needs no flag.
 The cron trigger (`* * * * *`) wakes the DO every minute as a watchdog.
+
+## Wiki commit feed (2026-09-05)
+- `POST /github-webhook` (stateless, no DO) — GitHub webhook on `boring877/gacha-wiki` (hook id 674997117, `push` events only). Signature-verified via `x-hub-signature-256` HMAC-SHA256 against the `GITHUB_WEBHOOK_SECRET` Cloudflare secret (same value in `.dev.vars`).
+- Posts blue embeds to `#wiki-updates` (id `1545851895074263080`, Info category, @everyone read-only: view+history+react, send denied) — one per push to the default branch, up to 8 commits listed, commit subject + author + compare link + files-touched count. `ping` events post a one-time "connected" notice (fires on webhook create/edit).
+- Non-default-branch pushes and non-push events are 200'd and ignored. Handler + formatter live in `src/wikifeed.ts`.
+
+## X crosspost (SHELVED 2026-09-05 — #x-feed deleted)
+- `#x-feed` never worked (created 2026-08-29, never wired). Reading X is paywalled everywhere free (API reads paid, syndication 429, nitter dead, xcancel whitelist-gated, jina blocked), and the user won't pay for the API — so the channel was **deleted** (2026-09-05). The dormant tweet+mirror code stays in `src/xpost.ts` (OAuth 1.0a signer validated against the Twitter docs vector + independent Python impl — expected sig `hCtSmYh+iHYCEqBWrE7C7hYmtUk=`); wiring lives in `wikifeed.ts`, activates only if all four `X_*` secrets are ever set. To revive: create a channel, set `X_FEED_CHANNEL_ID` + the 4 secrets, deploy.
+- Tweet format was "📚 wiki update — <subject> (+N more)\ngachawiki.info", ≤280 weighted chars. X failures never fail the GitHub delivery.
 
 ## Known gaps / future work
 - The hardcoded buy-GIF URLs in `src/swapfeed.ts` (`BUY_GIFS`) were placeholders and mostly 404 (verified: 4 of 5 dead). Sells have no GIFs. To fix properly: get a free Tenor API key (their public API now requires one) and search live, OR have the user paste verified URLs.
